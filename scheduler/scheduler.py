@@ -1,12 +1,16 @@
 import numpy
 import itertools
-from . import population
+import population
+import time
 import random
+import math
+import csv
 
 SOL1 = [1,1,1,1,1,1,1,1,1,1,1,1]
 SOL2 = [1,1,1,2,2,2,3,3,3,4,4,1]
 SOL3 = [1,1,4,2,2,2,3,3,3,4,4,1]
 SOL4 = [1,2,3,4,1,2,3,4,1,2,3,4]
+POP_INI = [SOL1, SOL2, SOL3, SOL4]
 
 
 class Scheduler:
@@ -17,9 +21,9 @@ class Scheduler:
         self.incompatibilities = []
 
         self.read_input(filename)
+        self.population = population.Population(self.num_courses, math.ceil(math.log(self.num_slots, 2)), POP_INI)
         self.calculate_incompatibilities()
-
-        self.genetic_algorithm(SOL1)
+        self.genetic_algorithm(POP_INI, 0.1)
 
     def read_input(self, filename):
         file_path = 'files/' + filename
@@ -32,7 +36,9 @@ class Scheduler:
                     self.num_slots = int(line[0])
                     self.num_courses = int(line[1])
                 else:
-                    self.students_per_course.append(list(map(int, line)))
+                    course = list(map(lambda x: int(x)-1, line))
+                    self.students_per_course.append(course)
+
                 cnt += 1
                 line = fp.readline().strip()
 
@@ -49,15 +55,15 @@ class Scheduler:
             i += 1
 
     def calculate_incompatibilities(self):
-        print(self.students_per_course)
         for i in range(self.num_courses):
             list_inc = []
             list1 = self.students_per_course[i]
-            for j in range(self.num_courses):
+            for j in range(i + 1, self.num_courses):
                 list2 = self.students_per_course[j]
                 list_inc.append(len(list(set(list1).intersection(list2))))
             self.incompatibilities.append(list_inc)
-        self.print_incompatibilites()
+        #self.print_incompatibilites()
+
 
     def print_incompatibilites(self):
         for line in self.incompatibilities:
@@ -65,37 +71,90 @@ class Scheduler:
                 print(inc, end=" ")
             print('')
 
-    def fitness(self, solution):
-        slots = list()
-        for i in range(self.num_slots):
-            slots.append(list())
+    def fitness(self, individual):
+        courses_per_slot = list()
 
-        for i in range(len(solution)):
-            slots[solution[i]-1].append(i)
+        for i in range(self.num_slots):
+            courses_per_slot.append(list())
+
+        #courses per slot
+        for i in range(self.num_courses):
+            slot = individual.get_feature(i)
+            if slot >= self.num_slots:
+                return 0
+            courses_per_slot[slot].append(i)
 
         total_incs = 0
 
-        for slot in slots:
+        for slot in courses_per_slot:
             combinations = list(set(list(itertools.combinations(slot, 2))))
+
             slot_incs = 0
             for comb in combinations:
-                slot_incs += self.incompatibilities[comb[0]][comb[1]]
+                min_val = min(comb[0], comb[1])
+                max_val = max(comb[0], comb[1])
+                slot_incs += self.incompatibilities[min_val][max_val-min_val-1]
             total_incs += slot_incs
-        print(total_incs)
 
-    def genetic_algorithm(self, ini_pop):
-        new_pop = population.Population()
-        for i in range(self.num_courses):
-            # to do afterwards
-            ind_1 = population.Individual(1)
-            ind_2 = population.Individual(2)
-            child = ind_1.reproduce(ind_2)
-            if random.random(0, 1) < 0.1:
-                child.mutate()
-            new_pop.add_individual(child)
+        #print(total_incs)
+        return 1/(total_incs+1)
 
-        while True
+    def max_fitness(self, population):
+        max_fit = -1
+        ind = None
+        for individual in population.individuals:
+            fitness = self.fitness(individual)
+            if fitness > max_fit:
+                max_fit = fitness
+                ind = individual
 
+        return ind, max_fit
+
+    def get_parents(self, population):
+        fitnesses = []
+        aux = population.individuals
+
+        for i in range(population.size):
+            fitnesses.append(self.fitness(population.individuals[i]))
+
+
+        parents = []
+        while not (len(parents)*2 >= population.size):
+            idx = fitnesses.index(max(fitnesses))
+            parents.append(population.individuals[idx])
+            del fitnesses[idx]
+            del aux[idx]
+
+        return parents
+
+
+    def genetic_algorithm(self, ini_pop, mut_prob):
+        start_time = time.time()
+
+        # with open('results'+str(mut_prob)+".csv", 'w') as csvfile:
+        #     filewriter = csv.writer(csvfile)
+
+
+        pop = population.Population(self.num_courses, math.ceil(math.log(self.num_slots)), ini_pop)
+        num_generations = 0
+        max_ind = None
+
+        while True:
+            new_pop = population.Population(self.num_courses, math.ceil(math.log(self.num_slots)), [])
+            new_pop.set_individuals(self.get_parents(pop))
+            #new_pop.print()
+            new_pop.crossover_and_mutate(mut_prob)
+            pop = new_pop
+
+            max_ind, fitness = self.max_fitness(pop)
+            num_generations += 1
+                #filewriter.writerow([str(num_generations), fitness])
+            if num_generations > 4000:
+                break
+
+        #print("FITNESS", fitness)
+        #print("--- %s seconds ---" % (time.time() - start_time))
+
+        return fitness
 
 scheduler = Scheduler("courses.txt")
-
